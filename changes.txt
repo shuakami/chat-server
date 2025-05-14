@@ -1,0 +1,324 @@
+﻿diff --git a/README.md b/README.md
+index ce2a478..8ec6154 100644
+--- a/README.md
++++ b/README.md
+@@ -1,5 +1,7 @@
+ # E2EE Chat Server
+ 
+-一个基于Redis的E2EE的匿名聊天后端。
++一个基于Redis和WebSocket的匿名聊天后端。
+ 
+ powered by [Shuakami](https://github.com/Shuakami)
++
++[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/shuakami/chat-server)
+\ No newline at end of file
+diff --git a/routes/upload.ts b/routes/upload.ts
+index 504c8b6..de182f9 100644
+--- a/routes/upload.ts
++++ b/routes/upload.ts
+@@ -130,15 +130,15 @@ export default async function uploadRoutes(fastify: FastifyInstance) {
+ 
+           if (!roomId) {
+             return resolve(reply.code(400).send({
+-              error: '缺少房间ID'
++          error: '缺少房间ID'
+             }));
+-          }
++      }
+ 
+-          // 确保OSS管理器已初始化
+-          if (!ossManager) {
++      // 确保OSS管理器已初始化
++      if (!ossManager) {
+             console.log('[Upload] 初始化OSS管理器');
+             try {
+-              await initOSSManager();
++        await initOSSManager();
+             } catch (err) {
+               console.error('[Upload] 初始化OSS管理器失败:', err);
+               return resolve(reply.code(500).send({
+@@ -147,8 +147,8 @@ export default async function uploadRoutes(fastify: FastifyInstance) {
+             }
+           }
+ 
+-          // 生成文件路径
+-          const timestamp = Date.now();
++      // 生成文件路径
++      const timestamp = Date.now();
+           const filePath = `${roomId}/${timestamp}_${fileName}`;
+           
+           console.log('[Upload] 准备上传文件:', {
+@@ -159,7 +159,7 @@ export default async function uploadRoutes(fastify: FastifyInstance) {
+ 
+           try {
+             const { url, meta } = await (ossManager as OSSManager).uploadFile(
+-              filePath,
++        filePath,
+               fileData
+             );
+ 
+@@ -170,8 +170,8 @@ export default async function uploadRoutes(fastify: FastifyInstance) {
+             });
+ 
+             resolve(reply.send({
+-              url,
+-              meta
++        url,
++        meta
+             }));
+           } catch (err) {
+             console.error('[Upload] 上传文件到OSS失败:', err);
+@@ -179,12 +179,12 @@ export default async function uploadRoutes(fastify: FastifyInstance) {
+               error: '文件上传失败'
+             }));
+           }
+-        } catch (err) {
++    } catch (err) {
+           console.error('[Upload] 处理上传请求失败:', err);
+           resolve(reply.code(500).send({
+-            error: '文件上传失败'
++        error: '文件上传失败'
+           }));
+-        }
++    }
+       });
+ 
+       busboy.on('error', (err: Error) => {
+diff --git a/routes/websocket.ts b/routes/websocket.ts
+index 18fd29a..8a6d8b1 100644
+--- a/routes/websocket.ts
++++ b/routes/websocket.ts
+@@ -58,6 +58,25 @@ export default async function websocketRoutes(fastify: FastifyInstance) {
+     
+     // 记录用户加入时间
+     const joinTimestamp = Date.now();
++
++    // 获取并更新在线用户列表
++    const onlineUsers = await RoomManager.getOnlineUsers(params.roomId);
++    const isFirstJoin = !onlineUsers.includes(params.userId);
++    await RoomManager.addOnlineUser(params.roomId, params.userId);
++
++    // 如果是首次加入，推送在线用户列表
++    if (isFirstJoin) {
++      const updatedOnlineUsers = await RoomManager.getOnlineUsers(params.roomId);
++      const onlineListMessage: ChatMessage = {
++        type: 'onlineList',
++        roomId: params.roomId,
++        userId: 'system',
++        content: JSON.stringify(updatedOnlineUsers),
++        timestamp: Date.now()
++      };
++      const encryptedOnlineList = await CryptoManager.encryptMessage(onlineListMessage, roomKey);
++      ws.send(JSON.stringify(encryptedOnlineList));
++    }
+     
+     // 发送加入消息
+     const joinMessage: ChatMessage = {
+@@ -85,10 +104,10 @@ export default async function websocketRoutes(fastify: FastifyInstance) {
+               // 只返回用户加入时间点之后的消息，且过滤掉进出记录
+               if (decryptedMessage.timestamp >= joinTimestamp || 
+                   (decryptedMessage.type !== 'join' && decryptedMessage.type !== 'leave')) {
+-                return {
+-                  id,
+-                  ...decryptedMessage
+-                };
++              return {
++                id,
++                ...decryptedMessage
++              };
+               }
+             }
+             return null;
+@@ -99,10 +118,10 @@ export default async function websocketRoutes(fastify: FastifyInstance) {
+       ).then(messages => messages.filter(Boolean));
+ 
+       if (messages.length > 0) {
+-        ws.send(JSON.stringify({
+-          type: 'history',
+-          messages
+-        }));
++      ws.send(JSON.stringify({
++        type: 'history',
++        messages
++      }));
+       }
+     }
+ 
+@@ -246,36 +265,36 @@ export default async function websocketRoutes(fastify: FastifyInstance) {
+ 
+         // 处理普通消息
+         if (message.type === 'message' || (!message.type && !message.action)) {
+-          if (!message.content) {
+-            const errorMessage: ChatMessage = {
+-              type: 'error',
+-              roomId: params.roomId,
+-              userId: 'system',
+-              content: '消息内容不能为空',
+-              timestamp: Date.now()
+-            };
+-            const encryptedError = await CryptoManager.encryptMessage(errorMessage, roomKey!);
+-            ws.send(JSON.stringify(encryptedError));
+-            return;
+-          }
+-
+-          const chatMessage: ChatMessage = {
+-            type: 'message',
++        if (!message.content) {
++          const errorMessage: ChatMessage = {
++            type: 'error',
+             roomId: params.roomId,
+-            userId: ws.userId,
+-            content: message.content,
+-            timestamp: Date.now(),
+-            fileMeta: message.fileMeta
++            userId: 'system',
++            content: '消息内容不能为空',
++            timestamp: Date.now()
+           };
++          const encryptedError = await CryptoManager.encryptMessage(errorMessage, roomKey!);
++          ws.send(JSON.stringify(encryptedError));
++          return;
++        }
+ 
+-          // 加密消息
+-          const encryptedMessage = await CryptoManager.encryptMessage(chatMessage, roomKey!);
+-          const messageStr = JSON.stringify(encryptedMessage);
++        const chatMessage: ChatMessage = {
++          type: 'message',
++          roomId: params.roomId,
++          userId: ws.userId,
++          content: message.content,
++          timestamp: Date.now(),
++          fileMeta: message.fileMeta
++        };
++
++        // 加密消息
++        const encryptedMessage = await CryptoManager.encryptMessage(chatMessage, roomKey!);
++        const messageStr = JSON.stringify(encryptedMessage);
+ 
+-          // 发布消息到 Redis
+-          await redis.publish(roomChannel, messageStr);
+-          // 持久化存储
+-          await redis.xadd(roomChannel, '*', 'message', messageStr);
++        // 发布消息到 Redis
++        await redis.publish(roomChannel, messageStr);
++        // 持久化存储
++        await redis.xadd(roomChannel, '*', 'message', messageStr);
+         }
+ 
+       } catch (err) {
+@@ -311,6 +330,21 @@ export default async function websocketRoutes(fastify: FastifyInstance) {
+       clearInterval(pingInterval);
+       await subscriber.unsubscribe(roomChannel);
+ 
++      // 移除在线用户
++      await RoomManager.removeOnlineUser(params.roomId, params.userId);
++
++      // 获取更新后的在线用户列表并推送
++      const updatedOnlineUsers = await RoomManager.getOnlineUsers(params.roomId);
++      const onlineListMessage: ChatMessage = {
++        type: 'onlineList',
++        roomId: params.roomId,
++        userId: 'system',
++        content: JSON.stringify(updatedOnlineUsers),
++        timestamp: Date.now()
++      };
++      const encryptedOnlineList = await CryptoManager.encryptMessage(onlineListMessage, roomKey!);
++      await redis.publish(roomChannel, JSON.stringify(encryptedOnlineList));
++
+       // 发送离开消息
+       const leaveMessage: ChatMessage = {
+         type: 'leave',
+diff --git a/types/websocket.ts b/types/websocket.ts
+index c9e24f5..d6165ad 100644
+--- a/types/websocket.ts
++++ b/types/websocket.ts
+@@ -31,7 +31,7 @@ export interface EncryptedMessage {
+ }
+ 
+ export interface ChatMessage {
+-  type: 'message' | 'system' | 'join' | 'leave' | 'error' | 'delete' | 'edit';
++  type: 'message' | 'system' | 'join' | 'leave' | 'error' | 'delete' | 'edit' | 'onlineList';
+   roomId: string;
+   userId: string;
+   content: string;
+diff --git a/utils/oss.ts b/utils/oss.ts
+index 4f6d6a9..22fefb9 100644
+--- a/utils/oss.ts
++++ b/utils/oss.ts
+@@ -64,9 +64,9 @@ export class OSSManager {
+ 
+     // 上传文件
+     try {
+-      await this.client.send(new PutObjectCommand({
+-        Bucket: this.bucket,
+-        Key: key,
++    await this.client.send(new PutObjectCommand({
++      Bucket: this.bucket,
++      Key: key,
+         Body: fileBuffer,
+         ContentType: meta.mimeType
+       }));
+@@ -98,19 +98,19 @@ export class OSSManager {
+    */
+   async downloadFile(key: string): Promise<{ data: Buffer; meta: FileMeta }> {
+     try {
+-      const response = await this.client.send(new GetObjectCommand({
+-        Bucket: this.bucket,
+-        Key: key
+-      }));
++    const response = await this.client.send(new GetObjectCommand({
++      Bucket: this.bucket,
++      Key: key
++    }));
+ 
+-      const data = await this.streamToBuffer(response.Body as Readable);
+-      
+-      // 构建文件元数据
+-      const meta: FileMeta = {
+-        fileName: key.split('/').pop() || key,
+-        fileSize: data.length,
+-        mimeType: response.ContentType || this.getMimeType(key)
+-      };
++    const data = await this.streamToBuffer(response.Body as Readable);
++
++    // 构建文件元数据
++    const meta: FileMeta = {
++      fileName: key.split('/').pop() || key,
++      fileSize: data.length,
++      mimeType: response.ContentType || this.getMimeType(key)
++    };
+ 
+       return { data, meta };
+     } catch (error) {
+diff --git a/utils/room.ts b/utils/room.ts
+index 3ab5999..e359dec 100644
+--- a/utils/room.ts
++++ b/utils/room.ts
+@@ -348,4 +348,25 @@ export class RoomManager {
+       return false;
+     }
+   }
++
++  /**
++   * 将用户加入房间在线集合
++   */
++  static async addOnlineUser(roomId: string, userId: string): Promise<void> {
++    await redis.sadd(`${ROOM_USERS_PREFIX}${roomId}`, userId);
++  }
++
++  /**
++   * 将用户从房间在线集合移除
++   */
++  static async removeOnlineUser(roomId: string, userId: string): Promise<void> {
++    await redis.srem(`${ROOM_USERS_PREFIX}${roomId}`, userId);
++  }
++
++  /**
++   * 获取房间所有在线用户
++   */
++  static async getOnlineUsers(roomId: string): Promise<string[]> {
++    return await redis.smembers(`${ROOM_USERS_PREFIX}${roomId}`) as string[];
++  }
+ } 
+\ No newline at end of file

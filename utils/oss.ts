@@ -64,9 +64,9 @@ export class OSSManager {
 
     // 上传文件
     try {
-      await this.client.send(new PutObjectCommand({
-        Bucket: this.bucket,
-        Key: key,
+    await this.client.send(new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
         Body: fileBuffer,
         ContentType: meta.mimeType
       }));
@@ -98,19 +98,19 @@ export class OSSManager {
    */
   async downloadFile(key: string): Promise<{ data: Buffer; meta: FileMeta }> {
     try {
-      const response = await this.client.send(new GetObjectCommand({
-        Bucket: this.bucket,
-        Key: key
-      }));
+    const response = await this.client.send(new GetObjectCommand({
+      Bucket: this.bucket,
+      Key: key
+    }));
 
-      const data = await this.streamToBuffer(response.Body as Readable);
-      
-      // 构建文件元数据
-      const meta: FileMeta = {
-        fileName: key.split('/').pop() || key,
-        fileSize: data.length,
-        mimeType: response.ContentType || this.getMimeType(key)
-      };
+    const data = await this.streamToBuffer(response.Body as Readable);
+
+    // 构建文件元数据
+    const meta: FileMeta = {
+      fileName: key.split('/').pop() || key,
+      fileSize: data.length,
+      mimeType: response.ContentType || this.getMimeType(key)
+    };
 
       return { data, meta };
     } catch (error) {

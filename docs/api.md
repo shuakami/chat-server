@@ -93,7 +93,7 @@ interface SendMessage {
 **接收消息格式**：
 ```typescript
 interface ReceiveMessage {
-  type: 'message' | 'system' | 'join' | 'leave' | 'error';
+  type: 'message' | 'system' | 'join' | 'leave' | 'error' | 'delete' | 'edit' | 'onlineList';
   roomId: string;
   userId: string;
   content: string;
@@ -103,6 +103,7 @@ interface ReceiveMessage {
     fileSize: number;
     mimeType: string;
   };
+  messageId?: string;  // 用于编辑和删除操作
 }
 ```
 
@@ -115,6 +116,32 @@ interface ReceiveMessage {
 | join | 用户加入房间 |
 | leave | 用户离开房间 |
 | error | 错误消息 |
+| delete | 删除消息 |
+| edit | 编辑消息 |
+| onlineList | 在线用户列表更新 |
+
+**在线用户列表消息格式**：
+```typescript
+interface OnlineListMessage {
+  type: 'onlineList';
+  roomId: string;
+  userId: 'system';
+  content: string; // JSON.stringify(string[]) - 在线用户ID数组
+  timestamp: number;
+}
+```
+
+**示例**：
+```javascript
+// 处理在线用户列表更新
+ws.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+  if (message.type === 'onlineList') {
+    const onlineUsers = JSON.parse(message.content);
+    console.log('当前在线用户:', onlineUsers);
+  }
+};
+```
 
 ## HTTP API
 

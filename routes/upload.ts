@@ -130,15 +130,15 @@ export default async function uploadRoutes(fastify: FastifyInstance) {
 
           if (!roomId) {
             return resolve(reply.code(400).send({
-              error: '缺少房间ID'
+          error: '缺少房间ID'
             }));
-          }
+      }
 
-          // 确保OSS管理器已初始化
-          if (!ossManager) {
+      // 确保OSS管理器已初始化
+      if (!ossManager) {
             console.log('[Upload] 初始化OSS管理器');
             try {
-              await initOSSManager();
+        await initOSSManager();
             } catch (err) {
               console.error('[Upload] 初始化OSS管理器失败:', err);
               return resolve(reply.code(500).send({
@@ -147,8 +147,8 @@ export default async function uploadRoutes(fastify: FastifyInstance) {
             }
           }
 
-          // 生成文件路径
-          const timestamp = Date.now();
+      // 生成文件路径
+      const timestamp = Date.now();
           const filePath = `${roomId}/${timestamp}_${fileName}`;
           
           console.log('[Upload] 准备上传文件:', {
@@ -159,7 +159,7 @@ export default async function uploadRoutes(fastify: FastifyInstance) {
 
           try {
             const { url, meta } = await (ossManager as OSSManager).uploadFile(
-              filePath,
+        filePath,
               fileData
             );
 
@@ -170,8 +170,8 @@ export default async function uploadRoutes(fastify: FastifyInstance) {
             });
 
             resolve(reply.send({
-              url,
-              meta
+        url,
+        meta
             }));
           } catch (err) {
             console.error('[Upload] 上传文件到OSS失败:', err);
@@ -179,12 +179,12 @@ export default async function uploadRoutes(fastify: FastifyInstance) {
               error: '文件上传失败'
             }));
           }
-        } catch (err) {
+    } catch (err) {
           console.error('[Upload] 处理上传请求失败:', err);
           resolve(reply.code(500).send({
-            error: '文件上传失败'
+        error: '文件上传失败'
           }));
-        }
+    }
       });
 
       busboy.on('error', (err: Error) => {

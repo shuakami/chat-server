@@ -58,6 +58,24 @@ export default async function websocketRoutes(fastify: FastifyInstance) {
     
     // 记录用户加入时间
     const joinTimestamp = Date.now();
+
+    // 获取并更新在线用户列表
+    const onlineUsers = await RoomManager.getOnlineUsers(params.roomId);
+    const isFirstJoin = !onlineUsers.includes(params.userId);
+    await RoomManager.addOnlineUser(params.roomId, params.userId);
+
+    // 如果是首次加入，推送在线用户列表
+    if (isFirstJoin) {
+      const updatedOnlineUsers = await RoomManager.getOnlineUsers(params.roomId);
+      const onlineListMessage: ChatMessage = {
+        type: 'onlineList',
+        roomId: params.roomId,
+        userId: 'system',
+        content: JSON.stringify(updatedOnlineUsers),
+        timestamp: Date.now()
+      };
+      ws.send(JSON.stringify(onlineListMessage));
+    }
     
     // 发送加入消息
     const joinMessage: ChatMessage = {
@@ -68,8 +86,18 @@ export default async function websocketRoutes(fastify: FastifyInstance) {
       timestamp: joinTimestamp
     };
 
-    const encryptedJoinMessage = await CryptoManager.encryptMessage(joinMessage, roomKey);
-    await redis.publish(roomChannel, JSON.stringify(encryptedJoinMessage));
+    await redis.publish(roomChannel, JSON.stringify(joinMessage));
+
+    // 广播最新的在线用户列表
+    const currentOnlineUsers = await RoomManager.getOnlineUsers(params.roomId);
+    const onlineListMessage: ChatMessage = {
+      type: 'onlineList',
+      roomId: params.roomId,
+      userId: 'system',
+      content: JSON.stringify(currentOnlineUsers),
+      timestamp: Date.now()
+    };
+    await redis.publish(roomChannel, JSON.stringify(onlineListMessage));
 
     // 发送历史消息（只发送用户加入时间点之后的消息，且过滤掉进出记录）
     const history = await redis.xrevrange(roomChannel, '+', '-');
@@ -79,16 +107,28 @@ export default async function websocketRoutes(fastify: FastifyInstance) {
           try {
             const messageStr = fields[1];
             if (typeof messageStr === 'string') {
-              const encryptedMessage = JSON.parse(messageStr) as InternalEncryptedMessage;
-              const decryptedMessage = await CryptoManager.decryptMessage(encryptedMessage, roomKey!);
+              const parsedMessage = JSON.parse(messageStr);
               
-              // 只返回用户加入时间点之后的消息，且过滤掉进出记录
-              if (decryptedMessage.timestamp >= joinTimestamp || 
-                  (decryptedMessage.type !== 'join' && decryptedMessage.type !== 'leave')) {
-                return {
-                  id,
-                  ...decryptedMessage
-                };
+              // 如果是加密消息，先解密
+              if (parsedMessage.encrypted) {
+                const decryptedMessage = await CryptoManager.decryptMessage(parsedMessage as InternalEncryptedMessage, roomKey!);
+                // 只返回用户加入时间点之后的消息，且过滤掉进出记录
+                if (decryptedMessage.timestamp >= joinTimestamp || 
+                    (decryptedMessage.type !== 'join' && decryptedMessage.type !== 'leave')) {
+                  return {
+                    id,
+                    ...decryptedMessage
+                  };
+                }
+              } else {
+                // 未加密消息直接返回
+                if (parsedMessage.timestamp >= joinTimestamp || 
+                    (parsedMessage.type !== 'join' && parsedMessage.type !== 'leave')) {
+                  return {
+                    id,
+                    ...parsedMessage
+                  };
+                }
               }
             }
             return null;
@@ -113,11 +153,18 @@ export default async function websocketRoutes(fastify: FastifyInstance) {
     subscriber.on('message', async (channel, message) => {
       if (channel === roomChannel && ws.readyState === WebSocket.OPEN) {
         try {
-          const encryptedMessage = JSON.parse(message) as InternalEncryptedMessage;
-          const decryptedMessage = await CryptoManager.decryptMessage(encryptedMessage, roomKey!);
-          ws.send(JSON.stringify(decryptedMessage));
+          const parsedMessage = JSON.parse(message);
+          
+          // 如果是加密消息，先解密
+          if (parsedMessage.encrypted) {
+            const decryptedMessage = await CryptoManager.decryptMessage(parsedMessage as InternalEncryptedMessage, roomKey!);
+            ws.send(JSON.stringify(decryptedMessage));
+          } else {
+            // 未加密消息直接转发
+            ws.send(message);
+          }
         } catch (err) {
-          console.error('消息解密失败:', err);
+          console.error('消息处理失败:', err);
         }
       }
     });
@@ -246,36 +293,36 @@ export default async function websocketRoutes(fastify: FastifyInstance) {
 
         // 处理普通消息
         if (message.type === 'message' || (!message.type && !message.action)) {
-          if (!message.content) {
-            const errorMessage: ChatMessage = {
-              type: 'error',
-              roomId: params.roomId,
-              userId: 'system',
-              content: '消息内容不能为空',
-              timestamp: Date.now()
-            };
-            const encryptedError = await CryptoManager.encryptMessage(errorMessage, roomKey!);
-            ws.send(JSON.stringify(encryptedError));
-            return;
-          }
-
-          const chatMessage: ChatMessage = {
-            type: 'message',
+        if (!message.content) {
+          const errorMessage: ChatMessage = {
+            type: 'error',
             roomId: params.roomId,
-            userId: ws.userId,
-            content: message.content,
-            timestamp: Date.now(),
-            fileMeta: message.fileMeta
+            userId: 'system',
+            content: '消息内容不能为空',
+            timestamp: Date.now()
           };
+          const encryptedError = await CryptoManager.encryptMessage(errorMessage, roomKey!);
+          ws.send(JSON.stringify(encryptedError));
+          return;
+        }
 
-          // 加密消息
-          const encryptedMessage = await CryptoManager.encryptMessage(chatMessage, roomKey!);
-          const messageStr = JSON.stringify(encryptedMessage);
+        const chatMessage: ChatMessage = {
+          type: 'message',
+          roomId: params.roomId,
+          userId: ws.userId,
+          content: message.content,
+          timestamp: Date.now(),
+          fileMeta: message.fileMeta
+        };
 
-          // 发布消息到 Redis
-          await redis.publish(roomChannel, messageStr);
-          // 持久化存储
-          await redis.xadd(roomChannel, '*', 'message', messageStr);
+        // 加密消息
+        const encryptedMessage = await CryptoManager.encryptMessage(chatMessage, roomKey!);
+        const messageStr = JSON.stringify(encryptedMessage);
+
+        // 发布消息到 Redis
+        await redis.publish(roomChannel, messageStr);
+        // 持久化存储
+        await redis.xadd(roomChannel, '*', 'message', messageStr);
         }
 
       } catch (err) {
@@ -311,6 +358,20 @@ export default async function websocketRoutes(fastify: FastifyInstance) {
       clearInterval(pingInterval);
       await subscriber.unsubscribe(roomChannel);
 
+      // 移除在线用户
+      await RoomManager.removeOnlineUser(params.roomId, params.userId);
+
+      // 获取更新后的在线用户列表并推送
+      const updatedOnlineUsers = await RoomManager.getOnlineUsers(params.roomId);
+      const onlineListMessage: ChatMessage = {
+        type: 'onlineList',
+        roomId: params.roomId,
+        userId: 'system',
+        content: JSON.stringify(updatedOnlineUsers),
+        timestamp: Date.now()
+      };
+      await redis.publish(roomChannel, JSON.stringify(onlineListMessage));
+
       // 发送离开消息
       const leaveMessage: ChatMessage = {
         type: 'leave',
@@ -320,10 +381,7 @@ export default async function websocketRoutes(fastify: FastifyInstance) {
         timestamp: Date.now()
       };
 
-      const encryptedLeaveMessage = await CryptoManager.encryptMessage(leaveMessage, roomKey!);
-      const leaveMessageStr = JSON.stringify(encryptedLeaveMessage);
-      await redis.publish(roomChannel, leaveMessageStr);
-      await redis.xadd(roomChannel, '*', 'message', leaveMessageStr);
+      await redis.publish(roomChannel, JSON.stringify(leaveMessage));
     });
   };
 

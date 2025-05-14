@@ -348,4 +348,25 @@ export class RoomManager {
       return false;
     }
   }
+
+  /**
+   * 将用户加入房间在线集合
+   */
+  static async addOnlineUser(roomId: string, userId: string): Promise<void> {
+    await redis.sadd(`${ROOM_USERS_PREFIX}${roomId}`, userId);
+  }
+
+  /**
+   * 将用户从房间在线集合移除
+   */
+  static async removeOnlineUser(roomId: string, userId: string): Promise<void> {
+    await redis.srem(`${ROOM_USERS_PREFIX}${roomId}`, userId);
+  }
+
+  /**
+   * 获取房间所有在线用户
+   */
+  static async getOnlineUsers(roomId: string): Promise<string[]> {
+    return await redis.smembers(`${ROOM_USERS_PREFIX}${roomId}`) as string[];
+  }
 } 

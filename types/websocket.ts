@@ -31,7 +31,7 @@ export interface EncryptedMessage {
 }
 
 export interface ChatMessage {
-  type: 'message' | 'system' | 'join' | 'leave' | 'error' | 'delete' | 'edit';
+  type: 'message' | 'system' | 'join' | 'leave' | 'error' | 'delete' | 'edit' | 'onlineList';
   roomId: string;
   userId: string;
   content: string;
