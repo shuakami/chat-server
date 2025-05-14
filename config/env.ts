@@ -51,5 +51,5 @@ export const config: Config = {
   resend: {
     apiKey: process.env.RESEND_API_KEY || 're_',
     fromEmail: process.env.RESEND_FROM_EMAIL || 'noreply@email.sdjz.wiki'
-  }
-}; 
+  } 
+};  
