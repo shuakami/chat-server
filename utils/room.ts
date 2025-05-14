@@ -353,6 +353,7 @@ export class RoomManager {
    * 将用户加入房间在线集合
    */
   static async addOnlineUser(roomId: string, userId: string): Promise<void> {
+    // 使用 SADD，如果用户已存在也不会报错
     await redis.sadd(`${ROOM_USERS_PREFIX}${roomId}`, userId);
   }
 
@@ -367,6 +368,7 @@ export class RoomManager {
    * 获取房间所有在线用户
    */
   static async getOnlineUsers(roomId: string): Promise<string[]> {
-    return await redis.smembers(`${ROOM_USERS_PREFIX}${roomId}`) as string[];
+    const users = await redis.smembers(`${ROOM_USERS_PREFIX}${roomId}`);
+    return users || [];
   }
 } 

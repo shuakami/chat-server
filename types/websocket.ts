@@ -34,7 +34,7 @@ export interface ChatMessage {
   type: 'message' | 'system' | 'join' | 'leave' | 'error' | 'delete' | 'edit' | 'onlineList';
   roomId: string;
   userId: string;
-  content: string;
+  content: string | Record<string, unknown>;
   timestamp: number;
   fileMeta?: FileMeta;
   messageId?: string;  // 添加messageId字段用于编辑和删除操作
@@ -49,7 +49,7 @@ export interface SystemMessageContent {
 
 // 内部使用的加密消息格式
 export interface InternalEncryptedMessage {
-  type: 'message' | 'system' | 'join' | 'leave' | 'error' | 'delete' | 'edit';
+  type: 'message' | 'system' | 'join' | 'leave' | 'error' | 'delete' | 'edit' | 'onlineList';
   roomId: string;
   userId: string;
   timestamp: number;
