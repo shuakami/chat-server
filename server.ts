@@ -6,13 +6,15 @@ import websocketRoutes from './routes/websocket';
 import historyRoutes from './routes/history';
 import uploadRoutes from './routes/upload';
 import emojiRoutes from './routes/emoji';
+
 const fastify = Fastify({
-  logger: !config.isProduction, // 只在非生产环境开启日志
+  logger: !config.isProduction,
+  trustProxy: true // 信任代理，这对于 Render 很重要
 });
 
 // 注册 CORS 插件
 fastify.register(fastifyCors, {
-  origin: true, // 允许所有来源
+  origin: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
@@ -21,9 +23,7 @@ fastify.register(fastifyCors, {
 // 注册 WebSocket 插件
 fastify.register(fastifyWebsocket, {
   options: {
-    // WebSocket 选项
     clientTracking: true,
-    // 10MB 最大消息大小
     maxPayload: 10 * 1024 * 1024,
   }
 });
@@ -55,9 +55,13 @@ fastify.get('/', async (request, reply) => {
 
 const start = async () => {
   try {
-    await fastify.listen({ port: 3000, host: '0.0.0.0' });
-    fastify.log.info(`Server listening on http://localhost:3000`);
-    console.log(`Server listening on http://localhost:3000`);
+    // 使用 Render 分配的端口或默认端口
+    const port = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+    const host = '0.0.0.0'; // 监听所有网络接口
+
+    await fastify.listen({ port, host });
+    fastify.log.info(`Server listening on port ${port}`);
+    console.log(`Server listening on port ${port}`);
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
