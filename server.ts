@@ -6,6 +6,7 @@ import websocketRoutes from './routes/websocket';
 import historyRoutes from './routes/history';
 import uploadRoutes from './routes/upload';
 import emojiRoutes from './routes/emoji';
+import inviteRoutes from './routes/invite';
 
 const fastify = Fastify({
   logger: !config.isProduction,
@@ -33,6 +34,7 @@ fastify.register(websocketRoutes);
 fastify.register(historyRoutes);
 fastify.register(uploadRoutes);
 fastify.register(emojiRoutes);
+fastify.register(inviteRoutes);
 
 // 基础路由示例
 fastify.get('/', async (request, reply) => {

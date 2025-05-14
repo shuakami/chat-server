@@ -22,6 +22,10 @@ export interface Config {
     secretKey: string;
     bucket: string;
   };
+  resend: {
+    apiKey: string;
+    fromEmail: string;
+  };
 }
 
 export const config: Config = {
@@ -43,5 +47,9 @@ export const config: Config = {
     accessKey: process.env.DOGECLOUD_ACCESS_KEY || '',
     secretKey: process.env.DOGECLOUD_SECRET_KEY || '',
     bucket: process.env.DOGECLOUD_BUCKET || ''
+  },
+  resend: {
+    apiKey: process.env.RESEND_API_KEY || 're_',
+    fromEmail: process.env.RESEND_FROM_EMAIL || 'noreply@email.sdjz.wiki'
   }
 }; 
