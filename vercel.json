@@ -11,11 +11,5 @@
         "src": "/(.*)",
         "dest": "server.ts"
       }
-    ],
-    "crons": [
-      {
-        "path": "/api/tasks/cleanup",
-        "schedule": "0 3 * * *"
-      }
     ]
-  }
+}
