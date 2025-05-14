@@ -55,8 +55,8 @@ fastify.get('/', async (request, reply) => {
 
 const start = async () => {
   try {
-    // 使用 Render 分配的端口或默认端口
-    const port = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+    // 使用自定义端口
+    const port = process.env.PORT ? parseInt(process.env.PORT) : 14514;
     const host = '0.0.0.0'; // 监听所有网络接口
 
     await fastify.listen({ port, host });
