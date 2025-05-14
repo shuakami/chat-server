@@ -36,7 +36,21 @@ fastify.register(emojiRoutes);
 
 // 基础路由示例
 fastify.get('/', async (request, reply) => {
-  return { hello: 'world' };
+  const uptime = process.uptime();
+  const uptimeFormatted = {
+    days: Math.floor(uptime / 86400),
+    hours: Math.floor((uptime % 86400) / 3600),
+    minutes: Math.floor((uptime % 3600) / 60),
+    seconds: Math.floor(uptime % 60)
+  };
+
+  return {
+    status: 'healthy',
+    version: '1.0.1',
+    uptime: uptimeFormatted,
+    environment: config.isProduction ? 'production' : 'development',
+    timestamp: new Date().toISOString()
+  };
 });
 
 const start = async () => {
