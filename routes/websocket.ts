@@ -229,7 +229,58 @@ export default async function websocketRoutes (fastify: FastifyInstance) {
         const raw = JSON.parse(data.toString()) as ChatMessage & {
           action?: 'edit' | 'delete' | 'deleteAll';
           messageId?: string;
+          // 新增字段以匹配前端发送的 user_visibility 和 request_peeking_list 结构
+          isVisible?: boolean; // for user_visibility
+          requesterId?: string; // for request_peeking_list (虽然通常是 ws.userId)
         };
+
+        /* ----- 用户可见性状态更新 ----- */
+        if (raw.type === 'user_visibility') {
+          if (typeof raw.content !== 'string') {
+            return sendEncrypted(ws, buildError(params.roomId, 'user_visibility 的 content 必须是 JSON 字符串'), roomKey!);
+          }
+          try {
+            const visibilityContent = JSON.parse(raw.content as string);
+            if (typeof visibilityContent.isVisible !== 'boolean') {
+              return sendEncrypted(ws, buildError(params.roomId, 'isVisible 字段必须是布尔值'), roomKey!);
+            }
+            // 使用连接上的 ws.userId 和 ws.roomId 作为权威来源，忽略 content 中的 userId 和 roomId
+            await RoomManager.setPeekingStatus(ws.roomId, ws.userId, visibilityContent.isVisible);
+          } catch (e) {
+            fastify.log.error('解析 user_visibility content 失败:', e);
+            return sendEncrypted(ws, buildError(params.roomId, 'user_visibility content 解析失败'), roomKey!);
+          }
+          return; 
+        }
+
+        /* ----- 请求窥屏列表 ----- */
+        if (raw.type === 'request_peeking_list') {
+          // raw.roomId 和 raw.requesterId 应该由前端发送
+          const peekingUserIds = await RoomManager.getPeekingUsers(ws.roomId);
+          
+          let responseContent = '';
+          const actualPeekingUsers = peekingUserIds.filter(id => id !== ws.userId);
+
+          if (actualPeekingUsers.length > 0) {
+            responseContent = `正在暗中观察的杂鱼有：${actualPeekingUsers.join(', ')}。`;
+          } else {
+            // 检查请求者自己是否在窥屏列表中（理论上应该在，除非他刚把页面设为不可见）
+            if (peekingUserIds.includes(ws.userId)) {
+              responseContent = '这个房间里，就你一个在认真盯梢！';
+            } else {
+              responseContent = '奇怪，连你自个儿都没在看...房间里一片漆黑。';
+            }
+          }
+          // 如果原始列表为空（不包含请求者），也可能是这种情况
+          if (peekingUserIds.length === 0) {
+             responseContent = '目前房间里风平浪静，没人正在窥屏。';
+          }
+
+          const systemMessage = buildSystemMsg(ws.roomId, 'peeking_list_response', { details: responseContent });
+          // 系统消息直接发送给请求者，不需要加密
+          safeSend(ws, systemMessage);
+          return;
+        }
 
         /* ----- 删除 ----- */
         if (raw.type === 'delete' || raw.action === 'delete') {
@@ -369,6 +420,9 @@ export default async function websocketRoutes (fastify: FastifyInstance) {
     ws.on('close', async () => {
       await cleanUp();
       try {
+        // 清理窥屏状态
+        await RoomManager.setPeekingStatus(params.roomId, params.userId, false);
+
         const leaveMsg: ChatMessage = {
           type: 'leave',
           roomId: params.roomId,

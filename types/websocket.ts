@@ -31,7 +31,7 @@ export interface EncryptedMessage {
 }
 
 export interface ChatMessage {
-  type: 'message' | 'system' | 'join' | 'leave' | 'error' | 'delete' | 'edit' | 'onlineList' | 'deleteAll';
+  type: 'message' | 'system' | 'join' | 'leave' | 'error' | 'delete' | 'edit' | 'onlineList' | 'deleteAll' | 'user_visibility' | 'request_peeking_list';
   roomId: string;
   userId: string;
   content: string | Record<string, unknown>;
@@ -42,7 +42,7 @@ export interface ChatMessage {
 
 // 系统消息内容类型
 export interface SystemMessageContent {
-  action: 'edit' | 'delete' | 'deleteAll';
+  action: 'edit' | 'delete' | 'deleteAll' | 'peeking_list_response';
   messageId?: string;
   newMessage?: ChatMessage;
   count?: number;  // 用于批量删除时返回删除数量
@@ -50,7 +50,7 @@ export interface SystemMessageContent {
 
 // 内部使用的加密消息格式
 export interface InternalEncryptedMessage {
-  type: 'message' | 'system' | 'join' | 'leave' | 'error' | 'delete' | 'edit' | 'onlineList' | 'deleteAll';
+  type: 'message' | 'system' | 'join' | 'leave' | 'error' | 'delete' | 'edit' | 'onlineList' | 'deleteAll' | 'user_visibility' | 'request_peeking_list';
   roomId: string;
   userId: string;
   timestamp: number;

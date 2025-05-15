@@ -9,6 +9,7 @@ const ROOM_PASSWORD_PREFIX = 'room:pwd:';
 const ROOM_STREAM_PREFIX = 'chat:room:';
 const ROOM_USERS_PREFIX = 'room:users:';
 const ROOM_MEMBERS_PREFIX = 'room:members:';
+const ROOM_PEEKING_USERS_PREFIX = 'room:peeking:';
 const ROOM_META_PREFIX = 'room:meta:';
 const STREAM_SUFFIX = '';
 const DEFAULT_COUNT = 50;
@@ -225,6 +226,7 @@ export class RoomManager {
       `${ROOM_STREAM_PREFIX}${roomId}${STREAM_SUFFIX}`,
       `${ROOM_USERS_PREFIX}${roomId}`,
       `${ROOM_MEMBERS_PREFIX}${roomId}`,
+      `${ROOM_PEEKING_USERS_PREFIX}${roomId}`,
       `${ROOM_META_PREFIX}${roomId}`
     ];
     
@@ -469,6 +471,42 @@ export class RoomManager {
     } catch (err) {
       console.error(`批量删除用户消息失败 (用户: ${userId}, 房间: ${roomId}):`, err);
       return { success: false, count: deletedCount };
+    }
+  }
+
+
+  /**
+   * 设置用户的窥屏状态
+   * @param roomId 房间ID
+   * @param userId 用户ID
+   * @param isVisible 用户是否正在窥屏 (页面可见)
+   */
+  static async setPeekingStatus(roomId: string, userId: string, isVisible: boolean): Promise<void> {
+    const peekingKey = `${ROOM_PEEKING_USERS_PREFIX}${roomId}`;
+    try {
+      if (isVisible) {
+        await redis.sadd(peekingKey, userId);
+      } else {
+        await redis.srem(peekingKey, userId);
+      }
+    } catch (err) {
+      console.error(`设置用户 ${userId} 在房间 ${roomId} 的窥屏状态失败:`, err);
+      // 根据需要决定是否抛出错误或如何处理
+    }
+  }
+
+  /**
+   * 获取房间内所有正在窥屏的用户ID
+   * @param roomId 房间ID
+   */
+  static async getPeekingUsers(roomId: string): Promise<string[]> {
+    const peekingKey = `${ROOM_PEEKING_USERS_PREFIX}${roomId}`;
+    try {
+      const users = await redis.smembers(peekingKey);
+      return users || [];
+    } catch (err) {
+      console.error(`获取房间 ${roomId} 的窥屏用户列表失败:`, err);
+      return []; // 出错时返回空列表
     }
   }
 } 
