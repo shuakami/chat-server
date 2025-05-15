@@ -256,7 +256,6 @@ export default async function websocketRoutes (fastify: FastifyInstance) {
             count: result.count 
           });
           await redis.publish(roomChannel, JSON_STRINGIFY(await CryptoManager.encryptMessage(notice, roomKey!)));
-          safeSend(ws, notice);
           return;
         }
 
