@@ -7,6 +7,7 @@ import historyRoutes from './routes/history';
 import uploadRoutes from './routes/upload';
 import emojiRoutes from './routes/emoji';
 import inviteRoutes from './routes/invite';
+import pushRoutes from './routes/push';
 import cron from 'node-cron'; // 导入 node-cron
 import { cleanupTask } from './tasks/cleanup'; // 导入清理任务
 
@@ -37,6 +38,7 @@ fastify.register(historyRoutes);
 fastify.register(uploadRoutes);
 fastify.register(emojiRoutes);
 fastify.register(inviteRoutes);
+fastify.register(pushRoutes);
 
 // 基础路由示例
 fastify.get('/', async (request, reply) => {

@@ -8,6 +8,7 @@ const SALT_ROUNDS = 10;
 const ROOM_PASSWORD_PREFIX = 'room:pwd:';
 const ROOM_STREAM_PREFIX = 'chat:room:';
 const ROOM_USERS_PREFIX = 'room:users:';
+const ROOM_MEMBERS_PREFIX = 'room:members:';
 const ROOM_META_PREFIX = 'room:meta:';
 const STREAM_SUFFIX = '';
 const DEFAULT_COUNT = 50;
@@ -223,6 +224,7 @@ export class RoomManager {
       `${ROOM_PASSWORD_PREFIX}${roomId}`,
       `${ROOM_STREAM_PREFIX}${roomId}${STREAM_SUFFIX}`,
       `${ROOM_USERS_PREFIX}${roomId}`,
+      `${ROOM_MEMBERS_PREFIX}${roomId}`,
       `${ROOM_META_PREFIX}${roomId}`
     ];
     
@@ -392,11 +394,12 @@ export class RoomManager {
   }
 
   /**
-   * 将用户加入房间在线集合
+   * 将用户加入房间在线集合，并记录到房间历史成员列表
    */
   static async addOnlineUser(roomId: string, userId: string): Promise<void> {
     // 使用 SADD，如果用户已存在也不会报错
     await redis.sadd(`${ROOM_USERS_PREFIX}${roomId}`, userId);
+    await redis.sadd(`${ROOM_MEMBERS_PREFIX}${roomId}`, userId); // 同时添加到历史成员
   }
 
   /**
@@ -412,6 +415,14 @@ export class RoomManager {
   static async getOnlineUsers(roomId: string): Promise<string[]> {
     const users = await redis.smembers(`${ROOM_USERS_PREFIX}${roomId}`);
     return users || [];
+  }
+
+  /**
+   * 获取房间所有历史成员
+   */
+  static async getRoomMembers(roomId: string): Promise<string[]> {
+    const members = await redis.smembers(`${ROOM_MEMBERS_PREFIX}${roomId}`);
+    return members || [];
   }
 
   /**

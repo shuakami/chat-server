@@ -25,6 +25,11 @@ export interface Config {
     apiKey: string;
     fromEmail: string;
   };
+  vapid: {
+    publicKey: string;
+    privateKey: string;
+    subject: string; // mailto: address or URL
+  };
 }
 
 let loadedConfig: Config;
@@ -59,6 +64,11 @@ try {
   "resend": {
     "apiKey": "re_",
     "fromEmail": "noreply@email.sdjz.wiki"
+  },
+  "vapid": {
+    "publicKey": "",
+    "privateKey": "",
+    "subject": ""
   }
 }
     `);

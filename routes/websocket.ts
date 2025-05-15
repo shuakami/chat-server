@@ -16,6 +16,7 @@ import {
 import { CryptoManager } from '../utils/crypto';
 import { RoomManager } from '../utils/room';
 import { LRUCache } from '../utils/cache';   // ← 新增 LRU 缓存
+import { sendPushNotification } from './push'; // <-- 导入推送函数
 
 /* -------------------- 常量 -------------------- */
 const REDIS_ROOM_CHANNEL  = 'chat:room:';
@@ -306,11 +307,46 @@ export default async function websocketRoutes (fastify: FastifyInstance) {
             return sendEncrypted(ws, buildError(params.roomId, '消息持久化失败'), roomKey!);
           }
           chatMsg.messageId = streamId;
+          
+          // 广播给房间内的所有 WebSocket 连接
           await redis.publish(roomChannel, JSON_STRINGIFY(await CryptoManager.encryptMessage(chatMsg, roomKey!)));
+          
+          // 给发送者回执（通常 WebSocket 客户端会处理自己发送的消息，或依赖于广播）
           safeSend(ws, chatMsg);
+
+          // --- 开始离线推送逻辑 ---
+          try {
+            const allRoomMembers = await RoomManager.getRoomMembers(params.roomId);
+            const onlineUsersInRoom = await RoomManager.getOnlineUsers(params.roomId);
+            
+            const offlineUsers = allRoomMembers.filter(memberId => !onlineUsersInRoom.includes(memberId) && memberId !== ws.userId);
+
+            if (offlineUsers.length > 0) {
+              fastify.log.info(`房间 [${params.roomId}] 有 ${offlineUsers.length} 个潜在离线用户需要推送。`);
+              const pushPayload = {
+                title: `房间 ${params.roomId} 有新消息来自 ${chatMsg.userId}`,
+                body: typeof chatMsg.content === 'string' 
+                        ? (chatMsg.content.length > 100 ? chatMsg.content.substring(0, 97) + '...' : chatMsg.content)
+                        : '您收到一条新消息',
+                data: {
+                  roomId: params.roomId,
+                  messageId: chatMsg.messageId,
+                  senderId: chatMsg.userId
+                }
+              };
+              for (const targetUserId of offlineUsers) {
+                fastify.log.info(`尝试为用户 ${targetUserId} 在房间 ${params.roomId} 推送消息`);
+                sendPushNotification(fastify, targetUserId, pushPayload, params.roomId);
+              }
+            }
+          } catch (pushError) {
+            fastify.log.error(`为房间 ${params.roomId} 处理离线推送时出错:`, pushError);
+          }
+          // --- 结束离线推送逻辑 ---
           return;
         }
-      } catch {
+      } catch (parseError) { // 更具体的 catch 变量名
+        fastify.log.error('消息处理或解析错误:', parseError);
         await sendEncrypted(ws, buildError(params.roomId, '消息格式错误'), roomKey!);
       }
     });
