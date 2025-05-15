@@ -2,21 +2,16 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { redis } from '../config/redis';
 import { config } from '../config/env';
 import { FromSchema } from 'json-schema-to-ts';
-import webPush from 'web-push';
+import axios from 'axios';
 
 const GLOBAL_PUSH_SUBSCRIPTION_PREFIX = 'push:sub:'; // 全局订阅
 const ROOM_PUSH_SUBSCRIPTION_PREFIX = 'push:room:'; // 房间级订阅 push:room:<roomId>:user:<userId>
 
 // 初始化 web-push (如果 VAPID 密钥已配置)
 if (config.vapid.publicKey && config.vapid.privateKey && config.vapid.subject) {
-  webPush.setVapidDetails(
-    config.vapid.subject,
-    config.vapid.publicKey,
-    config.vapid.privateKey
-  );
-  console.log('Web Push VAPID details set.');
+  console.log('VAPID details are configured locally, proxy will handle its own VAPID setup.');
 } else {
-  console.warn('Web Push VAPID details not fully configured in config.json. Push notifications will not work.');
+  console.warn('Web Push VAPID details not fully configured in local config.json. Ensure proxy has VAPID configuration.');
 }
 
 const pushSubscriptionSchema = {
@@ -58,21 +53,24 @@ const unsubscribeBodySchema = {
   required: ['userId', 'endpoint']
 } as const;
 
+const PROXY_ENCRYPT_URL = 'https://webhook.sdjz.wiki/api/fcm_proxy_encrypt';
+
 /**
- * 向指定用户的所有特定订阅（全局或房间级）发送推送通知
+ * 向指定用户的所有特定订阅（全局或房间级）发送推送通知，通过加密代理
  * @param fastify Fastify 实例
  * @param userId 用户ID
- * @param payload 推送负载
+ * @param originalPayload 推送负载 (明文 JSON 对象或字符串)
  * @param roomId 可选，如果提供，则只推送该房间的订阅
  */
 export async function sendPushNotification(
   fastify: FastifyInstance,
   userId: string,
-  payload: object,
+  originalPayload: object | string, // 接受对象或字符串作为原始 payload
   roomId?: string
 ): Promise<void> {
+  // VAPID 密钥仍然建议在主应用 config 中配置，以明确依赖，即使代理实际使用它们
   if (!config.vapid.publicKey || !config.vapid.privateKey || !config.vapid.subject) {
-    fastify.log.warn(`VAPID keys not configured. Skipping push notification for user ${userId}.`);
+    fastify.log.warn(`VAPID keys not configured in server's config.json. Proxy service needs these to function. Skipping push for user ${userId}.`);
     return;
   }
 
@@ -86,22 +84,47 @@ export async function sendPushNotification(
   try {
     const subscriptionsStr = await redis.smembers(userSubscriptionKey);
     if (!subscriptionsStr || subscriptionsStr.length === 0) {
+      fastify.log.info(`No push subscriptions found for user ${userId} (key: ${userSubscriptionKey}). Skipping.`);
       return;
     }
-    const payloadStr = JSON.stringify(payload);
+
+    // const pushOptions = { TTL: 86400 }; // 24 hours, 如果代理支持，可以传递
+
     for (const subStr of subscriptionsStr) {
       try {
-        const subscription = JSON.parse(subStr) as FromSchema<typeof pushSubscriptionSchema>; 
-        await webPush.sendNotification(subscription, payloadStr)
-          .catch(async (error) => {
-            fastify.log.error(`Error sending push to ${userId} (key: ${userSubscriptionKey}, endpoint: ${subscription.endpoint}):`, error);
-            if (error.statusCode === 404 || error.statusCode === 410) {
-              fastify.log.info(`Subscription for ${userId} (key: ${userSubscriptionKey}, endpoint: ${subscription.endpoint}) is invalid. Removing.`);
-              await redis.srem(userSubscriptionKey, subStr);
+        const subscription = JSON.parse(subStr) as FromSchema<typeof pushSubscriptionSchema>;
+        
+        const proxyRequestBody = {
+          subscription: subscription,
+          payload: originalPayload, // 发送原始的，未stringify的（如果它是对象）
+          // options: pushOptions // 如果代理支持并需要自定义 TTL 等选项
+        };
+
+        try {
+          fastify.log.info(`Sending push to ${userId} via encrypting proxy for endpoint ${subscription.endpoint.substring(0, 50)}...`);
+          const proxyResponse = await axios.post(PROXY_ENCRYPT_URL, proxyRequestBody, {
+            validateStatus: function (status: number) { 
+              return status >= 200 && status < 600;
             }
           });
-      } catch (parseOrSendError) {
-        fastify.log.error(`Failed to process subscription or send push for user ${userId} (key: ${userSubscriptionKey}): ${subStr}`, parseOrSendError);
+
+          fastify.log.info(`Push to ${userId} via encrypting proxy for endpoint ${subscription.endpoint.substring(0,50)}... completed with status ${proxyResponse.status}`);
+
+          if (proxyResponse.status === 404 || proxyResponse.status === 410) {
+            fastify.log.info(`Subscription for ${userId} (endpoint: ${subscription.endpoint.substring(0,50)}...) is invalid (reported by proxy with status ${proxyResponse.status}). Removing.`);
+            await redis.srem(userSubscriptionKey, subStr);
+          } else if (proxyResponse.status < 200 || proxyResponse.status >= 300) {
+            fastify.log.error(`Error sending push via encrypting proxy to ${userId} (endpoint: ${subscription.endpoint.substring(0,50)}...): Status ${proxyResponse.status}`, proxyResponse.data);
+          }
+
+        } catch (axiosError: any) {
+          fastify.log.error(`Network error or other issue calling encrypting proxy for ${userId} (endpoint: ${subscription.endpoint.substring(0,50)}...):`, axiosError.message || axiosError);
+          if (axiosError.response) {
+            fastify.log.error('Encrypting proxy response error data:', axiosError.response.data);
+          }
+        }
+      } catch (parseError) { 
+        fastify.log.error(`Failed to parse subscription JSON for user ${userId} (key: ${userSubscriptionKey}): '${subStr}'`, parseError);
       }
     }
   } catch (redisError) {
@@ -202,5 +225,4 @@ export default async function pushRoutes(fastify: FastifyInstance) {
     }
   );
 
-  // 后续可以添加发送测试推送的接口等
 } 
