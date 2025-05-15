@@ -61,6 +61,38 @@ async function initOSSManager() {
   }
 }
 
+// 辅助函数：执行OSS操作，并在失败时重试一次
+async function executeOssOperationWithRetry<T>(
+  operation: () => Promise<T>,
+  fastifyInstance: FastifyInstance
+): Promise<T> {
+  try {
+    // 首次尝试确保OSS管理器已初始化
+    if (!ossManager) {
+      fastifyInstance.log.info('[OSS] OSS Manager not initialized. Initializing now...');
+      await initOSSManager();
+    }
+    if (!ossManager) { // 确保init后ossManager有效
+        throw new Error('OSS Manager failed to initialize');
+    }
+    return await operation();
+  } catch (error: any) {
+    fastifyInstance.log.warn('[OSS] First attempt failed. Re-initializing OSS Manager and retrying.', { error: error.message });
+    // 尝试重新初始化OSS Manager
+    try {
+      await initOSSManager();
+      if (!ossManager) { // 确保init后ossManager有效
+        throw new Error('OSS Manager failed to re-initialize');
+      }
+      // 重试操作
+      return await operation();
+    } catch (retryError: any) {
+      fastifyInstance.log.error('[OSS] Retry attempt also failed.', { error: retryError.message });
+      throw retryError; // 如果重试仍然失败，则抛出错误
+    }
+  }
+}
+
 export default async function uploadRoutes(fastify: FastifyInstance) {
   // 添加 multipart/form-data 的 content-type parser
   fastify.addContentTypeParser('multipart/form-data', (request, payload, done) => {
@@ -158,9 +190,10 @@ export default async function uploadRoutes(fastify: FastifyInstance) {
           });
 
           try {
-            const { url, meta } = await (ossManager as OSSManager).uploadFile(
-        filePath,
-              fileData
+            // 使用新的辅助函数执行上传操作
+            const { url, meta } = await executeOssOperationWithRetry(
+              () => (ossManager as OSSManager).uploadFile(filePath, fileData!),
+              fastify
             );
 
             console.log('[Upload] 文件上传成功:', {
@@ -221,12 +254,10 @@ export default async function uploadRoutes(fastify: FastifyInstance) {
       }
 
       // 下载文件
-      if (!ossManager) {
-        throw new Error('OSS管理器未初始化');
-      }
-
-      const { data, meta } = await ossManager.downloadFile(
-        `${room}/${key}`
+      // 使用新的辅助函数执行下载操作
+      const { data, meta } = await executeOssOperationWithRetry(
+        () => (ossManager as OSSManager).downloadFile(`${room}/${key}`),
+        fastify
       );
 
       // 设置响应头
