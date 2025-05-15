@@ -7,6 +7,8 @@ import historyRoutes from './routes/history';
 import uploadRoutes from './routes/upload';
 import emojiRoutes from './routes/emoji';
 import inviteRoutes from './routes/invite';
+import cron from 'node-cron'; // 导入 node-cron
+import { cleanupTask } from './tasks/cleanup'; // 导入清理任务
 
 const fastify = Fastify({
   logger: !config.isProduction,
@@ -64,6 +66,22 @@ const start = async () => {
     await fastify.listen({ port, host });
     fastify.log.info(`Server listening on port ${port}`);
     console.log(`Server listening on port ${port}`);
+
+    // 设置定时清理任务，每天凌晨3点执行
+    cron.schedule('0 3 * * *', async () => {
+      fastify.log.info('开始执行每日房间清理定时任务...');
+      try {
+        await cleanupTask();
+        fastify.log.info('每日房间清理定时任务完成。');
+      } catch (error) {
+        fastify.log.error('每日房间清理定时任务执行失败:', error);
+      }
+    }, {
+      scheduled: true,
+      timezone: "Asia/Shanghai" // 确保时区正确
+    });
+    fastify.log.info('每日房间清理定时任务已计划在每天凌晨3点 (Asia/Shanghai) 执行。');
+
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);

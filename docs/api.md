@@ -119,6 +119,7 @@ interface ReceiveMessage {
 | delete | 删除消息 |
 | edit | 编辑消息 |
 | onlineList | 在线用户列表更新 |
+| deleteAll | 批量删除用户消息 |
 
 **在线用户列表消息格式**：
 ```typescript
@@ -127,6 +128,27 @@ interface OnlineListMessage {
   roomId: string;
   userId: 'system';
   content: string; // JSON.stringify(string[]) - 在线用户ID数组
+  timestamp: number;
+}
+```
+
+**批量删除消息格式**：
+```typescript
+// 发送批量删除请求
+ws.send(JSON.stringify({
+  type: 'deleteAll'
+}));
+
+// 接收批量删除通知
+interface DeleteAllMessage {
+  type: 'system';
+  roomId: string;
+  userId: 'system';
+  content: {
+    action: 'deleteAll';
+    userId: string;  // 被删除消息的用户ID
+    count: number;   // 删除的消息数量
+  };
   timestamp: number;
 }
 ```

@@ -71,6 +71,10 @@ export class CryptoManager {
    * @param key 解密密钥
    */
   static async decryptMessage(message: InternalEncryptedMessage, key: Buffer): Promise<ChatMessage> {
+    if (!message?.payload?.iv || !message?.payload?.data) {
+      throw new Error('Invalid message format: missing required encryption fields');
+    }
+
     const iv = Buffer.from(message.payload.iv, 'base64');
     const data = Buffer.from(message.payload.data, 'base64');
     const tag = Buffer.from(message.payload.tag || '', 'base64');

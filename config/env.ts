@@ -1,6 +1,5 @@
-import dotenv from 'dotenv';
-
-dotenv.config();
+import fs from 'fs';
+import path from 'path';
 
 export interface Config {
   redis: {
@@ -28,28 +27,49 @@ export interface Config {
   };
 }
 
-export const config: Config = {
-  redis: {
-    url: process.env.REDIS_URL || 'redis://localhost:6379',
-    token: process.env.REDIS_TOKEN || ''
+let loadedConfig: Config;
+
+try {
+  const configPath = path.resolve(process.cwd(), 'config.json');
+  if (!fs.existsSync(configPath)) {
+    console.error(`错误：配置文件 config.json 未在路径 ${configPath} 中找到。`);
+    console.error("请根据 config/env.ts 中的 Config 接口创建一个 config.json 文件。");
+    console.error("您可以使用以下模板作为起点：");
+    console.error(`
+{
+  "redis": {
+    "url": "redis://localhost:6379",
+    "token": ""
   },
-  jwt: {
-    secret: process.env.JWT_SECRET || 'your-secret-key'
+  "jwt": {
+    "secret": "your-secret-key"
   },
-  room: {
-    ttl: parseInt(process.env.ROOM_TTL || '86400', 10),
-    maxMessages: parseInt(process.env.ROOM_MAX_MESSAGES || '5000', 10),
-    inactiveTtl: parseInt(process.env.ROOM_INACTIVE_TTL || '2592000', 10), // 30天
-    cleanupInterval: parseInt(process.env.ROOM_CLEANUP_INTERVAL || '86400', 10) // 24小时
+  "room": {
+    "ttl": 86400,
+    "maxMessages": 5000,
+    "inactiveTtl": 2592000,
+    "cleanupInterval": 86400
   },
-  isProduction: process.env.NODE_ENV === 'production',
-  dogecloud: {
-    accessKey: process.env.DOGECLOUD_ACCESS_KEY || '',
-    secretKey: process.env.DOGECLOUD_SECRET_KEY || '',
-    bucket: process.env.DOGECLOUD_BUCKET || ''
+  "isProduction": false,
+  "dogecloud": {
+    "accessKey": "",
+    "secretKey": "",
+    "bucket": ""
   },
-  resend: {
-    apiKey: process.env.RESEND_API_KEY || 're_',
-    fromEmail: process.env.RESEND_FROM_EMAIL || 'noreply@email.sdjz.wiki'
-  } 
-};  
+  "resend": {
+    "apiKey": "re_",
+    "fromEmail": "noreply@email.sdjz.wiki"
+  }
+}
+    `);
+    process.exit(1);
+  }
+  const configFile = fs.readFileSync(configPath, 'utf-8');
+  loadedConfig = JSON.parse(configFile) as Config;
+
+} catch (error) {
+  console.error("加载配置文件 config.json 时出错:", error);
+  process.exit(1);
+}
+
+export const config: Config = loadedConfig;  
