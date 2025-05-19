@@ -31,12 +31,13 @@ export interface EncryptedMessage {
 }
 
 export interface ChatMessage {
-  type: 'message' | 'system' | 'join' | 'leave' | 'error' | 'delete' | 'edit' | 'onlineList' | 'deleteAll' | 'user_visibility' | 'request_peeking_list';
+  type: 'message' | 'system' | 'join' | 'leave' | 'error' | 'delete' | 'edit' | 'onlineList' | 'deleteAll' | 'user_visibility' | 'request_peeking_list' | 'voice-channel-action';
   roomId: string;
   userId: string;
   content: string | Record<string, unknown>;
   timestamp: number;
   fileMeta?: FileMeta;
+  agoraUid?: number;
   messageId?: string;  // 添加messageId字段用于编辑和删除操作
 }
 
@@ -50,7 +51,7 @@ export interface SystemMessageContent {
 
 // 内部使用的加密消息格式
 export interface InternalEncryptedMessage {
-  type: 'message' | 'system' | 'join' | 'leave' | 'error' | 'delete' | 'edit' | 'onlineList' | 'deleteAll' | 'user_visibility' | 'request_peeking_list';
+  type: 'message' | 'system' | 'join' | 'leave' | 'error' | 'delete' | 'edit' | 'onlineList' | 'deleteAll' | 'user_visibility' | 'request_peeking_list' | 'voice-channel-action';
   roomId: string;
   userId: string;
   timestamp: number;

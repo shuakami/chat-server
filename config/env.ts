@@ -30,6 +30,8 @@ export interface Config {
     privateKey: string;
     subject: string; // mailto: address or URL
   };
+  agoraAppId: string;
+  agoraAppCertificate: string;
 }
 
 let loadedConfig: Config;
@@ -69,7 +71,9 @@ try {
     "publicKey": "",
     "privateKey": "",
     "subject": ""
-  }
+  },
+  "agoraAppId": "",
+  "agoraAppCertificate": ""
 }
     `);
     process.exit(1);

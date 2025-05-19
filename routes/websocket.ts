@@ -17,6 +17,7 @@ import { CryptoManager } from '../utils/crypto';
 import { RoomManager } from '../utils/room';
 import { LRUCache } from '../utils/cache';   // ← 新增 LRU 缓存
 import { sendPushNotification } from './push'; // <-- 导入推送函数
+import { VoiceChannelActionMessage, VoiceChannelStateMessage } from '../types/agora';
 
 /* -------------------- 常量 -------------------- */
 const REDIS_ROOM_CHANNEL  = 'chat:room:';
@@ -138,12 +139,7 @@ export default async function websocketRoutes (fastify: FastifyInstance) {
     /* ---------- 房间密钥 ---------- */
     let roomKey = await CryptoManager.getRoomKey(params.roomId);
     if (!roomKey) {
-      await CryptoManager.generateRoomKey(params.roomId);
-      roomKey = await CryptoManager.getRoomKey(params.roomId);
-    }
-    if (!roomKey) {
-      safeSend(ws, buildError(params.roomId, '房间密钥生成失败'));
-      await subscriber.disconnect();
+      safeSend(ws, buildError(params.roomId, '房间密钥获取失败，无法处理消息'));
       return ws.close();
     }
 
@@ -226,21 +222,15 @@ export default async function websocketRoutes (fastify: FastifyInstance) {
     /* =================== 消息处理 =================== */
     ws.on('message', async (data) => {
       try {
-        const raw = JSON.parse(data.toString()) as ChatMessage & {
-          action?: 'edit' | 'delete' | 'deleteAll';
-          messageId?: string;
-          // 新增字段以匹配前端发送的 user_visibility 和 request_peeking_list 结构
-          isVisible?: boolean; // for user_visibility
-          requesterId?: string; // for request_peeking_list (虽然通常是 ws.userId)
-        };
+        const parsedMessage = JSON.parse(data.toString()) as ChatMessage;
 
         /* ----- 用户可见性状态更新 ----- */
-        if (raw.type === 'user_visibility') {
-          if (typeof raw.content !== 'string') {
+        if (parsedMessage.type === 'user_visibility') {
+          if (typeof parsedMessage.content !== 'string') {
             return sendEncrypted(ws, buildError(params.roomId, 'user_visibility 的 content 必须是 JSON 字符串'), roomKey!);
           }
           try {
-            const visibilityContent = JSON.parse(raw.content as string);
+            const visibilityContent = JSON.parse(parsedMessage.content as string);
             if (typeof visibilityContent.isVisible !== 'boolean') {
               return sendEncrypted(ws, buildError(params.roomId, 'isVisible 字段必须是布尔值'), roomKey!);
             }
@@ -254,7 +244,7 @@ export default async function websocketRoutes (fastify: FastifyInstance) {
         }
 
         /* ----- 请求窥屏列表 ----- */
-        if (raw.type === 'request_peeking_list') {
+        if (parsedMessage.type === 'request_peeking_list') {
           // raw.roomId 和 raw.requesterId 应该由前端发送
           const peekingUserIds = await RoomManager.getPeekingUsers(ws.roomId);
           
@@ -283,22 +273,22 @@ export default async function websocketRoutes (fastify: FastifyInstance) {
         }
 
         /* ----- 删除 ----- */
-        if (raw.type === 'delete' || raw.action === 'delete') {
-          if (!raw.messageId) {
+        if (parsedMessage.type === 'delete' || (parsedMessage as any).action === 'delete') {
+          if (!parsedMessage.messageId) {
             return sendEncrypted(ws, buildError(params.roomId, '消息 ID 不能为空'), roomKey!);
           }
-          const ok = await RoomManager.deleteMessage(params.roomId, raw.messageId, ws.userId, roomKey!);
+          const ok = await RoomManager.deleteMessage(params.roomId, parsedMessage.messageId, ws.userId, roomKey!);
           if (!ok) {
             return sendEncrypted(ws, buildError(params.roomId, '删除失败'), roomKey!);
           }
-          const notice = buildSystemMsg(params.roomId, 'delete', { messageId: raw.messageId });
+          const notice = buildSystemMsg(params.roomId, 'delete', { messageId: parsedMessage.messageId });
           await redis.publish(roomChannel, JSON_STRINGIFY(await CryptoManager.encryptMessage(notice, roomKey!)));
           safeSend(ws, notice);
           return;
         }
 
         /* ----- 批量删除用户消息 ----- */
-        if (raw.type === 'deleteAll') {
+        if (parsedMessage.type === 'deleteAll') {
           const result = await RoomManager.deleteUserMessages(params.roomId, ws.userId, roomKey!);
           if (!result.success) {
             return sendEncrypted(ws, buildError(params.roomId, '批量删除失败'), roomKey!);
@@ -312,26 +302,26 @@ export default async function websocketRoutes (fastify: FastifyInstance) {
         }
 
         /* ----- 编辑 ----- */
-        if (raw.type === 'edit' || raw.action === 'edit') {
-          if (!raw.messageId || !raw.content) {
+        if (parsedMessage.type === 'edit' || (parsedMessage as any).action === 'edit') {
+          if (!parsedMessage.messageId || !parsedMessage.content) {
             return sendEncrypted(ws, buildError(params.roomId, '消息 ID 与内容不能为空'), roomKey!);
           }
           const newMsg: ChatMessage = {
             type: 'message',
             roomId: params.roomId,
             userId: ws.userId,
-            content: raw.content,
+            content: parsedMessage.content,
             timestamp: Date.now(),
-            fileMeta: raw.fileMeta,
-            messageId: raw.messageId
+            fileMeta: parsedMessage.fileMeta,
+            messageId: parsedMessage.messageId
           };
           const encrypted = await CryptoManager.encryptMessage(newMsg, roomKey!);
-          const ok = await RoomManager.editMessage(params.roomId, raw.messageId, ws.userId, encrypted, roomKey!);
+          const ok = await RoomManager.editMessage(params.roomId, parsedMessage.messageId, ws.userId, encrypted, roomKey!);
           if (!ok) {
             return sendEncrypted(ws, buildError(params.roomId, '修改失败'), roomKey!);
           }
           const notice = buildSystemMsg(params.roomId, 'edit', {
-            messageId: raw.messageId,
+            messageId: parsedMessage.messageId,
             newMessage: { ...newMsg }
           });
           await redis.publish(roomChannel, JSON_STRINGIFY(await CryptoManager.encryptMessage(notice, roomKey!)));
@@ -340,17 +330,17 @@ export default async function websocketRoutes (fastify: FastifyInstance) {
         }
 
         /* ----- 普通消息 ----- */
-        if (raw.type === 'message' || (!raw.type && !raw.action)) {
-          if (!raw.content) {
+        if (parsedMessage.type === 'message' || (!parsedMessage.type && !(parsedMessage as any).action)) {
+          if (!parsedMessage.content) {
             return sendEncrypted(ws, buildError(params.roomId, '消息内容不能为空'), roomKey!);
           }
           const chatMsg: ChatMessage = {
             type: 'message',
             roomId: params.roomId,
             userId: ws.userId,
-            content: raw.content,
+            content: parsedMessage.content,
             timestamp: Date.now(),
-            fileMeta: raw.fileMeta
+            fileMeta: parsedMessage.fileMeta
           };
           const encrypted = await CryptoManager.encryptMessage(chatMsg, roomKey!);
           const streamId  = await RoomManager.saveMessage(params.roomId, encrypted);
@@ -396,9 +386,88 @@ export default async function websocketRoutes (fastify: FastifyInstance) {
           // --- 结束离线推送逻辑 ---
           return;
         }
-      } catch (parseError) { // 更具体的 catch 变量名
+
+        /* ----- 语音操作 ----- */
+        if (parsedMessage.type === 'voice-channel-action') {
+          // 调试日志：完整打印收到的消息内容和类型
+          fastify.log.warn(`[DEBUG] 收到 voice-channel-action: ${JSON.stringify(parsedMessage)} | typeof agoraUid: ${typeof (parsedMessage as any).agoraUid}`);
+
+          // 兼容前端把 payload 放在 content 字段的情况
+          let actionMessage: VoiceChannelActionMessage;
+          if (
+            typeof parsedMessage.agoraUid === 'undefined' &&
+            typeof parsedMessage.content === 'string'
+          ) {
+            try {
+              const inner = JSON.parse(parsedMessage.content);
+              actionMessage = { ...parsedMessage, ...inner };
+              fastify.log.warn(`[DEBUG] 自动解包 content 字段，得到: ${JSON.stringify(actionMessage)}`);
+            } catch (e) {
+              fastify.log.error(`[DEBUG] content 字段 JSON.parse 失败: ${parsedMessage.content}`);
+              return sendEncrypted(ws, buildError(ws.roomId, '语音操作消息格式错误（content无法解析）'), roomKey!);
+            }
+          } else {
+            actionMessage = parsedMessage as unknown as VoiceChannelActionMessage;
+          }
+
+          // 自动补全 userId
+          if (!actionMessage.userId) {
+            fastify.log.warn(`VoiceChannelAction: 自动补全 |  ws.userId=${ws.userId}`);
+            actionMessage.userId = ws.userId;
+          }
+
+          // 自动转换 agoraUid 为 number
+          if (typeof actionMessage.agoraUid === 'string' && /^\d+$/.test(actionMessage.agoraUid)) {
+            fastify.log.warn(`VoiceChannelAction: 自动将 agoraUid 字符串转为数字: ${actionMessage.agoraUid}`);
+            actionMessage.agoraUid = Number(actionMessage.agoraUid);
+          }
+
+          // Basic validation
+          if (actionMessage.userId !== ws.userId) {
+            console.warn(`VoiceChannelAction: userId mismatch. Expected ${ws.userId}, got ${actionMessage.userId}`);
+            return sendEncrypted(ws, buildError(ws.roomId, '语音操作用户身份校验失败'), roomKey!);
+          }
+          if (typeof actionMessage.agoraUid !== 'number' || isNaN(actionMessage.agoraUid)) { 
+            console.warn(`VoiceChannelAction: agoraUid missing or invalid for user ${ws.userId}`);
+            return sendEncrypted(ws, buildError(ws.roomId, '语音操作缺少或 agoraUid 无效'), roomKey!);
+          }
+
+          let stateAction: VoiceChannelStateMessage['action'] | null = null;
+          switch (actionMessage.action) { // actionMessage.action is now correctly typed
+            case 'notify-joined': stateAction = 'user-joined-voice'; break;
+            case 'notify-left': stateAction = 'user-left-voice'; break;
+            case 'notify-muted': stateAction = 'user-muted-audio'; break;
+            case 'notify-unmuted': stateAction = 'user-unmuted-audio'; break;
+            default:
+              const unknownAction = (actionMessage as any).action;
+              console.warn(`Unknown voice-channel-action action: ${unknownAction}`);
+              return sendEncrypted(ws, buildError(ws.roomId, '未知的语音操作类型'), roomKey!);
+          }
+
+          const voiceStateMessage: VoiceChannelStateMessage = {
+            type: 'voice-channel-state',
+            roomId: ws.roomId,
+            userId: ws.userId,
+            agoraUid: actionMessage.agoraUid,
+            action: stateAction,
+            timestamp: Date.now(),
+          };
+
+          fastify.log.info(`Publishing voice state: ${JSON.stringify(voiceStateMessage)} to ${roomChannel}`);
+          await redis.publish(roomChannel, JSON.stringify(voiceStateMessage));
+          return; 
+        }
+
+        /* ----- 无效的消息类型 ----- */
+        fastify.log.warn(`Unhandled/Unknown message type: ${parsedMessage.type} in room ${ws.roomId}`);
+        sendEncrypted(ws, buildError(params.roomId, '无效或不支持的消息类型'), roomKey!);
+      } catch (parseError) {
         fastify.log.error('消息处理或解析错误:', parseError);
-        await sendEncrypted(ws, buildError(params.roomId, '消息格式错误'), roomKey!);
+        if (roomKey) {
+            sendEncrypted(ws, buildError(params.roomId || (request.query as any)?.roomId || 'unknown', '消息处理失败，请稍后重试'), roomKey );
+        } else {
+            safeSend(ws, buildError(params.roomId || (request.query as any)?.roomId || 'unknown', '消息处理失败且无法加密错误信息，请稍后重试'));
+        }
       }
     });
 
